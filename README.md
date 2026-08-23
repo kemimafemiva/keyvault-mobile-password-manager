@@ -11,15 +11,16 @@ The prototype explores how modern mobile security mechanisms can be combined to 
 - Platform-protected encryption key management
   - Android Keystore
   - iOS Keychain
-- Biometric authentication using Face ID or fingerprint
-- Device credential/PIN fallback where supported
+- Native biometric and device authentication
+  - Biometric authentication using supported device capabilities, such as facial recognition or fingerprint authentication
+  - Device passcode/PIN fallback where supported
 - Automatic vault locking when the application enters the background
 - Re-authentication for protected operations
 - Protection against modified ciphertext, nonce, and authentication tags
 - Clipboard clearing after copying sensitive credential data
 - Android screen-capture protection using `FLAG_SECURE`
 - iOS privacy screen protection during application lifecycle transitions
-- Secure vault reset when the encryption key is unavailable
+- Secure vault reset when the encryption key is unavailable or inaccessible
 - Local-only credential storage with no cloud synchronization
 
 ## Technology Stack
@@ -31,8 +32,8 @@ The prototype explores how modern mobile security mechanisms can be combined to 
 - Android Keystore
 - iOS Keychain
 - AES-256-GCM
-- `local_auth`
-- `flutter_secure_storage`
+- Flutter Method Channels
+- Native Android and iOS authentication APIs
 
 ## Security Design
 
@@ -40,9 +41,9 @@ KeyVault follows a layered security approach.
 
 Credential data is serialized and encrypted using AES-256-GCM before being persisted. AES-GCM provides both confidentiality and integrity protection, allowing the application to detect modifications to encrypted data.
 
-Encryption keys are kept separate from the encrypted credential data and protected using platform-specific secure storage mechanisms. Android uses the Android Keystore, while iOS uses the Keychain.
+Encryption keys are kept separate from the encrypted credential data and protected using platform-specific secure storage mechanisms. Android uses the Android Keystore, while iOS uses the iOS Keychain.
 
-Access to the vault is protected through device authentication. Where available, users can authenticate using biometrics such as Face ID or fingerprint recognition, with device credentials used as a fallback where supported.
+Access to the vault is protected through native device authentication. Where available, users can authenticate using supported biometric capabilities, such as facial recognition or fingerprint authentication, with device credentials used as a fallback where supported.
 
 The application also automatically locks when moved to the background and applies platform-specific privacy protections to reduce the risk of credential information being exposed through application previews or screen capture.
 
