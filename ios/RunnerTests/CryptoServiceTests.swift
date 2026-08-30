@@ -6,16 +6,19 @@
 //
 
 import XCTest
+
 @testable import Runner
 
 final class CryptoServiceTests: XCTestCase {
-
     private var cryptoService: CryptoService!
 
     override func setUpWithError() throws {
-        cryptoService = CryptoService(requireAuthentication: false)
+        cryptoService = CryptoService(
+            requireAuthentication: false
+        )
 
-        // Each test starts with a fresh encryption key.
+        // Each test starts with a fresh encryption key
+        // and no active crypto session.
         try cryptoService.deleteKey()
     }
 
@@ -24,7 +27,9 @@ final class CryptoServiceTests: XCTestCase {
         cryptoService = nil
     }
 
-    func testEncryptAndDecryptReturnsOriginalPlainText() throws {
+    func testUnlockSessionAllowsEncryptionAndDecryption() throws {
+        try cryptoService.unlockSession()
+
         let plainText = "TestPassword123!"
 
         let encrypted = try cryptoService.encrypt(
@@ -51,8 +56,108 @@ final class CryptoServiceTests: XCTestCase {
             plainText
         )
     }
-    
+
+    func testEncryptRequiresUnlockedSession() throws {
+        XCTAssertThrowsError(
+            try cryptoService.encrypt(
+                "TestPassword123!"
+            )
+        ) { error in
+            guard case CryptoServiceError.authenticationRequired = error else {
+                XCTFail(
+                    "Expected authenticationRequired, got \(error)."
+                )
+                return
+            }
+        }
+    }
+
+    func testLockSessionPreventsFurtherEncryption() throws {
+        try cryptoService.unlockSession()
+
+        cryptoService.lockSession()
+
+        XCTAssertThrowsError(
+            try cryptoService.encrypt(
+                "TestPassword123!"
+            )
+        ) { error in
+            guard case CryptoServiceError.authenticationRequired = error else {
+                XCTFail(
+                    "Expected authenticationRequired, got \(error)."
+                )
+                return
+            }
+        }
+    }
+
+    func testLockSessionPreventsFurtherDecryption() throws {
+        try cryptoService.unlockSession()
+
+        let encrypted = try cryptoService.encrypt(
+            "TestPassword123!"
+        )
+
+        guard
+            let cipherText = encrypted["cipherText"] as? [UInt8],
+            let nonce = encrypted["nonce"] as? [UInt8],
+            let mac = encrypted["mac"] as? [UInt8]
+        else {
+            XCTFail("Invalid encrypted data.")
+            return
+        }
+
+        cryptoService.lockSession()
+
+        XCTAssertThrowsError(
+            try cryptoService.decrypt(
+                cipherText: cipherText,
+                nonce: nonce,
+                mac: mac
+            )
+        ) { error in
+            guard case CryptoServiceError.authenticationRequired = error else {
+                XCTFail(
+                    "Expected authenticationRequired, got \(error)."
+                )
+                return
+            }
+        }
+    }
+
+    func testEncryptAndDecryptReturnsOriginalPlainText() throws {
+        try cryptoService.unlockSession()
+
+        let plainText = "TestPassword123!"
+
+        let encrypted = try cryptoService.encrypt(
+            plainText
+        )
+
+        guard
+            let cipherText = encrypted["cipherText"] as? [UInt8],
+            let nonce = encrypted["nonce"] as? [UInt8],
+            let mac = encrypted["mac"] as? [UInt8]
+        else {
+            XCTFail("Invalid encrypted data.")
+            return
+        }
+
+        let decrypted = try cryptoService.decrypt(
+            cipherText: cipherText,
+            nonce: nonce,
+            mac: mac
+        )
+
+        XCTAssertEqual(
+            decrypted,
+            plainText
+        )
+    }
+
     func testDecryptRejectsModifiedCipherText() throws {
+        try cryptoService.unlockSession()
+
         let encrypted = try cryptoService.encrypt(
             "TestPassword123!"
         )
@@ -68,7 +173,6 @@ final class CryptoServiceTests: XCTestCase {
 
         XCTAssertFalse(cipherText.isEmpty)
 
-        // Deliberately corrupt one byte.
         cipherText[0] ^= 0x01
 
         XCTAssertThrowsError(
@@ -81,6 +185,8 @@ final class CryptoServiceTests: XCTestCase {
     }
 
     func testDecryptRejectsModifiedAuthenticationTag() throws {
+        try cryptoService.unlockSession()
+
         let encrypted = try cryptoService.encrypt(
             "TestPassword123!"
         )
@@ -96,7 +202,6 @@ final class CryptoServiceTests: XCTestCase {
 
         XCTAssertFalse(mac.isEmpty)
 
-        // Deliberately corrupt the authentication tag.
         mac[0] ^= 0x01
 
         XCTAssertThrowsError(
@@ -109,6 +214,8 @@ final class CryptoServiceTests: XCTestCase {
     }
 
     func testDecryptRejectsModifiedNonce() throws {
+        try cryptoService.unlockSession()
+
         let encrypted = try cryptoService.encrypt(
             "TestPassword123!"
         )
@@ -134,5 +241,4 @@ final class CryptoServiceTests: XCTestCase {
             )
         )
     }
-
 }

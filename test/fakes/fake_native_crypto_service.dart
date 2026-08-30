@@ -1,16 +1,43 @@
 import 'dart:convert';
 
+import 'package:key_vault/exceptions/authentication_required_exception.dart';
 import 'package:key_vault/models/encrypted_data.dart';
 import 'package:key_vault/services/native_crypto_service.dart';
-import 'package:key_vault/exceptions/authentication_required_exception.dart';
 
 class FakeNativeCryptoService extends NativeCryptoService {
   bool shouldFailDecryption = false;
-  int deleteKeyCallCount = 0;
   bool shouldRequireAuthentication = false;
+  bool shouldFailUnlock = false;
+
+  int unlockSessionCallCount = 0;
+  int lockSessionCallCount = 0;
+  int encryptCallCount = 0;
+  int decryptCallCount = 0;
+  int deleteKeyCallCount = 0;
+
+  bool sessionUnlocked = false;
+
+  @override
+  Future<void> unlockSession() async {
+    unlockSessionCallCount++;
+
+    if (shouldFailUnlock) {
+      throw const AuthenticationRequiredException();
+    }
+
+    sessionUnlocked = true;
+  }
+
+  @override
+  Future<void> lockSession() async {
+    lockSessionCallCount++;
+    sessionUnlocked = false;
+  }
 
   @override
   Future<EncryptedData> encrypt(String plainText) async {
+    encryptCallCount++;
+
     final encoded = utf8.encode(plainText);
 
     return EncryptedData(
@@ -22,8 +49,10 @@ class FakeNativeCryptoService extends NativeCryptoService {
 
   @override
   Future<String> decrypt(EncryptedData encryptedData) async {
+    decryptCallCount++;
+
     if (shouldRequireAuthentication) {
-      throw AuthenticationRequiredException();
+      throw const AuthenticationRequiredException();
     }
 
     if (shouldFailDecryption) {
@@ -39,5 +68,6 @@ class FakeNativeCryptoService extends NativeCryptoService {
   @override
   Future<void> deleteKey() async {
     deleteKeyCallCount++;
+    sessionUnlocked = false;
   }
 }

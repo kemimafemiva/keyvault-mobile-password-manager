@@ -2,14 +2,16 @@ package com.oluwakemimafe.key_vault
 
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
+import android.security.keystore.UserNotAuthenticatedException
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
-import android.security.keystore.UserNotAuthenticatedException
 
-open class CryptoService(private val requireAuthentication: Boolean = true) {
+open class CryptoService(
+    private val requireAuthentication: Boolean = true
+) {
 
     companion object {
         private const val KEY_ALIAS = "keyvault_encryption_key"
@@ -23,10 +25,28 @@ open class CryptoService(private val requireAuthentication: Boolean = true) {
             load(null)
         }
 
-    open fun encrypt(plainText: String): Map<String, Any> {
+    open fun unlockSession() {
+        getOrCreateKey()
+    }
+
+    open fun lockSession() {
+        /*
+         * Android Keystore retains control of the key.
+         * No application-level key is cached on Android.
+         *
+         * The Flutter authentication gate is responsible for
+         * preventing vault access after the application locks.
+         */
+    }
+
+    open fun encrypt(
+        plainText: String
+    ): Map<String, Any> {
         val secretKey = getOrCreateKey()
 
-        val cipher = Cipher.getInstance(TRANSFORMATION)
+        val cipher = Cipher.getInstance(
+            TRANSFORMATION
+        )
 
         try {
             cipher.init(
@@ -38,7 +58,9 @@ open class CryptoService(private val requireAuthentication: Boolean = true) {
         }
 
         val encryptedData = cipher.doFinal(
-            plainText.toByteArray(Charsets.UTF_8)
+            plainText.toByteArray(
+                Charsets.UTF_8
+            )
         )
 
         val nonce = cipher.iv
@@ -48,20 +70,23 @@ open class CryptoService(private val requireAuthentication: Boolean = true) {
          *
          * ciphertext || authentication tag
          *
-         * the Dart/iOS contract keeps these separate,
-         * so splitting the final 16 bytes into the MAC/tag.
+         * The Dart/iOS contract keeps these separate,
+         * so split the final 16 bytes into the MAC/tag.
          */
-        val tagLengthBytes = GCM_TAG_LENGTH / 8
+        val tagLengthBytes =
+            GCM_TAG_LENGTH / 8
 
-        val cipherText = encryptedData.copyOfRange(
-            0,
-            encryptedData.size - tagLengthBytes
-        )
+        val cipherText =
+            encryptedData.copyOfRange(
+                0,
+                encryptedData.size - tagLengthBytes
+            )
 
-        val mac = encryptedData.copyOfRange(
-            encryptedData.size - tagLengthBytes,
-            encryptedData.size
-        )
+        val mac =
+            encryptedData.copyOfRange(
+                encryptedData.size - tagLengthBytes,
+                encryptedData.size
+            )
 
         return mapOf(
             "cipherText" to cipherText.toList(),
@@ -77,7 +102,9 @@ open class CryptoService(private val requireAuthentication: Boolean = true) {
     ): String {
         val secretKey = getExistingKey()
 
-        val cipher = Cipher.getInstance(TRANSFORMATION)
+        val cipher = Cipher.getInstance(
+            TRANSFORMATION
+        )
 
         val parameterSpec = GCMParameterSpec(
             GCM_TAG_LENGTH,
@@ -94,12 +121,16 @@ open class CryptoService(private val requireAuthentication: Boolean = true) {
             throw AuthenticationRequiredException()
         }
 
-        // Reconstruct ciphertext || authentication tag.
-        val encryptedData = cipherText + mac
+        /*
+         * Reconstruct ciphertext || authentication tag.
+         */
+        val encryptedData =
+            cipherText + mac
 
-        val decryptedData = cipher.doFinal(
-            encryptedData
-        )
+        val decryptedData =
+            cipher.doFinal(
+                encryptedData
+            )
 
         return String(
             decryptedData,
@@ -108,13 +139,17 @@ open class CryptoService(private val requireAuthentication: Boolean = true) {
     }
 
     open fun deleteKey() {
+        lockSession()
+
         if (keyStore.containsAlias(KEY_ALIAS)) {
             keyStore.deleteEntry(KEY_ALIAS)
         }
     }
 
     private fun getOrCreateKey(): SecretKey {
-        return if (keyStore.containsAlias(KEY_ALIAS)) {
+        return if (
+            keyStore.containsAlias(KEY_ALIAS)
+        ) {
             getExistingKey()
         } else {
             createKey()
@@ -132,24 +167,27 @@ open class CryptoService(private val requireAuthentication: Boolean = true) {
                 "KeyVault encryption key was not found."
             )
     }
-    private fun createKey(): SecretKey {
-        val keyGenerator = KeyGenerator.getInstance(
-            KeyProperties.KEY_ALGORITHM_AES,
-            ANDROID_KEYSTORE
-        )
 
-        val keySpecBuilder = KeyGenParameterSpec.Builder(
-            KEY_ALIAS,
-            KeyProperties.PURPOSE_ENCRYPT or
-                KeyProperties.PURPOSE_DECRYPT
-        )
-            .setBlockModes(
-                KeyProperties.BLOCK_MODE_GCM
+    private fun createKey(): SecretKey {
+        val keyGenerator =
+            KeyGenerator.getInstance(
+                KeyProperties.KEY_ALGORITHM_AES,
+                ANDROID_KEYSTORE
             )
-            .setEncryptionPaddings(
-                KeyProperties.ENCRYPTION_PADDING_NONE
+
+        val keySpecBuilder =
+            KeyGenParameterSpec.Builder(
+                KEY_ALIAS,
+                KeyProperties.PURPOSE_ENCRYPT or
+                    KeyProperties.PURPOSE_DECRYPT
             )
-            .setKeySize(256)
+                .setBlockModes(
+                    KeyProperties.BLOCK_MODE_GCM
+                )
+                .setEncryptionPaddings(
+                    KeyProperties.ENCRYPTION_PADDING_NONE
+                )
+                .setKeySize(256)
 
         if (requireAuthentication) {
             keySpecBuilder

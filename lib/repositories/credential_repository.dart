@@ -26,12 +26,10 @@ class CredentialRepository {
     }
 
     final encryptedJson = jsonDecode(storedVault) as Map<String, dynamic>;
-
     final encryptedData = EncryptedData.fromJson(encryptedJson);
 
     try {
       final decryptedVault = await _cryptoService.decrypt(encryptedData);
-
       final decodedCredentials = jsonDecode(decryptedVault) as List<dynamic>;
 
       return decodedCredentials

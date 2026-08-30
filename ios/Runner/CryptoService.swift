@@ -8,8 +8,13 @@
 import Foundation
 import CryptoKit
 import Security
+import LocalAuthentication
 
 protocol CryptoServicing {
+    func unlockSession() throws
+
+    func lockSession()
+
     func encrypt(
         _ plainText: String
     ) throws -> [String: Any]
@@ -27,16 +32,25 @@ final class CryptoService: CryptoServicing {
     private let requireAuthentication: Bool
     private let service = "com.oluwakemimafe.keyvault"
     private let account = "vault-encryption-key"
+    private var sessionKey: SymmetricKey?
 
     init(requireAuthentication: Bool = true) {
         self.requireAuthentication = requireAuthentication
     }
 
-    func encrypt(_ plainText: String) throws -> [String: Any] {
-        let key = try getOrCreateKey()
+    // MARK: - Encryption
+
+    func encrypt(
+        _ plainText: String
+    ) throws -> [String: Any] {
+        let key = try getSessionKey()
+
         let data = Data(plainText.utf8)
 
-        let sealedBox = try AES.GCM.seal(data, using: key)
+        let sealedBox = try AES.GCM.seal(
+            data,
+            using: key
+        )
 
         guard let nonceData = sealedBox.nonce.withUnsafeBytes({
             Data($0)
@@ -51,15 +65,19 @@ final class CryptoService: CryptoServicing {
         ]
     }
 
+    // MARK: - Decryption
+
     func decrypt(
         cipherText: [UInt8],
         nonce: [UInt8],
         mac: [UInt8]
     ) throws -> String {
-        let key = try getExistingKey()
+        let key = try getSessionKey()
 
         let sealedBox = try AES.GCM.SealedBox(
-            nonce: AES.GCM.Nonce(data: Data(nonce)),
+            nonce: AES.GCM.Nonce(
+                data: Data(nonce)
+            ),
             ciphertext: Data(cipherText),
             tag: Data(mac)
         )
@@ -79,21 +97,32 @@ final class CryptoService: CryptoServicing {
         return plainText
     }
 
-    func deleteKey() throws {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account
-        ]
+    // MARK: - Session Management
 
-        let status = SecItemDelete(
-            query as CFDictionary
-        )
-
-        guard status == errSecSuccess ||
-              status == errSecItemNotFound else {
-            throw CryptoServiceError.keychainError(status)
+    func unlockSession() throws {
+        guard sessionKey == nil else {
+            return
         }
+
+        do {
+            sessionKey = try getExistingKey()
+        } catch CryptoServiceError.keyNotFound {
+            _ = try createKey()
+
+            sessionKey = try getExistingKey()
+        }
+    }
+
+    func lockSession() {
+        sessionKey = nil
+    }
+
+    private func getSessionKey() throws -> SymmetricKey {
+        guard let sessionKey else {
+            throw CryptoServiceError.authenticationRequired
+        }
+
+        return sessionKey
     }
 
     // MARK: - Key Management
@@ -116,12 +145,17 @@ final class CryptoService: CryptoServicing {
         ]
 
         if requireAuthentication {
-            query[kSecUseOperationPrompt as String] =
+            let context = LAContext()
+
+            context.localizedReason =
                 "Authenticate to access your KeyVault encryption key."
+
+            query[kSecUseAuthenticationContext as String] =
+                context
         }
 
         var result: CFTypeRef?
-        
+
         let status = SecItemCopyMatching(
             query as CFDictionary,
             &result
@@ -138,14 +172,18 @@ final class CryptoService: CryptoServicing {
         }
 
         guard status == errSecSuccess else {
-            throw CryptoServiceError.keychainError(status)
+            throw CryptoServiceError.keychainError(
+                status
+            )
         }
 
         guard let keyData = result as? Data else {
             throw CryptoServiceError.invalidKeyData
         }
 
-        return SymmetricKey(data: keyData)
+        return SymmetricKey(
+            data: keyData
+        )
     }
 
     private func createKey() throws -> SymmetricKey {
@@ -165,6 +203,7 @@ final class CryptoService: CryptoServicing {
         ]
 
         if requireAuthentication {
+
             var error: Unmanaged<CFError>?
 
             guard let accessControl =
@@ -175,12 +214,15 @@ final class CryptoService: CryptoServicing {
                     &error
                 )
             else {
-                throw CryptoServiceError.accessControlCreationFailed
+                throw CryptoServiceError
+                    .accessControlCreationFailed
             }
 
             query[kSecAttrAccessControl as String] =
                 accessControl
+
         } else {
+
             query[kSecAttrAccessible as String] =
                 kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
         }
@@ -191,10 +233,36 @@ final class CryptoService: CryptoServicing {
         )
 
         guard status == errSecSuccess else {
-            throw CryptoServiceError.keychainError(status)
+            throw CryptoServiceError.keychainError(
+                status
+            )
         }
 
         return key
+    }
+
+    // MARK: - Key Deletion
+
+    func deleteKey() throws {
+        lockSession()
+
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+
+        let status = SecItemDelete(
+            query as CFDictionary
+        )
+
+        guard status == errSecSuccess ||
+              status == errSecItemNotFound else {
+
+            throw CryptoServiceError.keychainError(
+                status
+            )
+        }
     }
 }
 

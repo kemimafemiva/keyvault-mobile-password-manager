@@ -4,8 +4,8 @@ import 'package:key_vault/services/clipboard_service.dart';
 
 import '../models/credential.dart';
 import '../repositories/credential_repository.dart';
-import 'credential_form_screen.dart';
 import '../widgets/detail_item.dart';
+import 'credential_form_screen.dart';
 
 class CredentialDetailsScreen extends StatefulWidget {
   final Credential credential;
@@ -29,6 +29,7 @@ class CredentialDetailsScreen extends StatefulWidget {
 class _CredentialDetailsScreenState extends State<CredentialDetailsScreen> {
   late Credential _credential;
   bool _showPassword = false;
+  bool _isDeleting = false;
 
   @override
   void initState() {
@@ -74,20 +75,27 @@ class _CredentialDetailsScreenState extends State<CredentialDetailsScreen> {
       return;
     }
 
-    setState(() {
-      _credential = updatedCredential;
-      _showPassword = false;
-    });
+    /*
+     * The credential has already been persisted by
+     * CredentialFormScreen. Return to the vault and
+     * signal that its credential list should refresh.
+     */
+    Navigator.of(context).pop(true);
   }
 
   Future<void> _deleteCredential() async {
+    if (_isDeleting) {
+      return;
+    }
+
     final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) {
         return AlertDialog(
           title: const Text('Delete credential?'),
           content: Text(
-            'Delete the credential for ${_credential.serviceName}?',
+            'Delete the credential for '
+            '${_credential.serviceName}?',
           ),
           actions: [
             TextButton(
@@ -107,64 +115,93 @@ class _CredentialDetailsScreenState extends State<CredentialDetailsScreen> {
       },
     );
 
-    if (shouldDelete != true) {
+    if (shouldDelete != true || !mounted) {
       return;
     }
+
+    /*
+     * Deleting an existing credential is a
+     * destructive operation, so require one
+     * deliberate re-authentication.
+     */
+    final authenticated = await widget.onReauthenticate();
+
+    if (!authenticated) {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Authentication is required to delete this credential.',
+          ),
+        ),
+      );
+
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _isDeleting = true;
+    });
+
+    try {
+      await _persistDelete();
+    } on AuthenticationRequiredException {
+      if (!mounted) return;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Authentication is required to access the vault.'),
+        ),
+      );
+
+      return;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isDeleting = false;
+        });
+      }
+    }
+
+    if (!mounted) {
+      return;
+    }
+
+    /*
+     * Return to the vault and signal that
+     * the credential list should refresh.
+     */
+    Navigator.of(context).pop(true);
+  }
+
+  Future<void> _persistDelete() async {
+    final stopwatch = Stopwatch()..start();
 
     try {
       await widget.repository.deleteCredential(_credential.id);
-    } on AuthenticationRequiredException {
-      final authenticated = await widget.onReauthenticate();
 
-      if (!authenticated) {
-        if (!mounted) return;
+      stopwatch.stop();
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Authentication is required to delete this credential.',
-            ),
-          ),
-        );
-
-        return;
+      debugPrint(
+        'PERF delete_credential: '
+        '${stopwatch.elapsedMicroseconds / 1000} ms',
+      );
+    } finally {
+      if (stopwatch.isRunning) {
+        stopwatch.stop();
       }
-
-      // Authentication succeeded. Retry once.
-      await widget.repository.deleteCredential(_credential.id);
     }
-
-    if (!mounted) {
-      return;
-    }
-
-    Navigator.of(context).pop(true);
-
-    if (!mounted) {
-      return;
-    }
-
-    Navigator.of(context).pop(true);
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_credential.serviceName),
-        actions: [
-          IconButton(
-            onPressed: _editCredential,
-            tooltip: 'Edit credential',
-            icon: const Icon(Icons.edit_outlined),
-          ),
-          IconButton(
-            onPressed: _deleteCredential,
-            tooltip: 'Delete credential',
-            icon: const Icon(Icons.delete_outline),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text(_credential.serviceName)),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
@@ -254,6 +291,33 @@ class _CredentialDetailsScreenState extends State<CredentialDetailsScreen> {
               child: DetailItem(label: 'Website', value: _credential.website!),
             ),
           ],
+          const SizedBox(height: 32),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isDeleting ? null : _editCredential,
+                  icon: const Icon(Icons.edit_outlined),
+                  label: const Text('Edit'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isDeleting ? null : _deleteCredential,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.error,
+                    side: BorderSide(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                  icon: const Icon(Icons.delete_outline),
+                  label: Text(_isDeleting ? 'Deleting...' : 'Delete'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
         ],
       ),
     );

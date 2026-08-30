@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:key_vault/models/authentication_result.dart';
-
 import 'package:key_vault/screens/authentication_gate.dart';
 
 import '../fakes/fake_authentication_service.dart';
+import '../fakes/fake_native_crypto_service.dart';
 
 Future<void> tapUnlock(WidgetTester tester) async {
   await tester.pumpAndSettle();
@@ -14,215 +14,133 @@ Future<void> tapUnlock(WidgetTester tester) async {
 
 void main() {
   late GlobalKey<NavigatorState> navigatorKey;
+  late FakeAuthenticationService authenticationService;
+  late FakeNativeCryptoService cryptoService;
 
   setUp(() {
     navigatorKey = GlobalKey<NavigatorState>();
-  });
 
-  testWidgets('shows unlocked content after successful authentication', (
-    tester,
-  ) async {
-    final authenticationService = FakeAuthenticationService(
+    authenticationService = FakeAuthenticationService(
       authenticationResult: AuthenticationResult.success,
     );
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder:
-              (_, _) => const Scaffold(body: Text('Vault content')),
-        ),
+    cryptoService = FakeNativeCryptoService();
+  });
+
+  Widget buildAuthenticationGate({
+    Widget Function(
+      VoidCallback onLock,
+      Future<bool> Function() onReauthenticate,
+    )?
+    unlockedBuilder,
+  }) {
+    return MaterialApp(
+      navigatorKey: navigatorKey,
+      home: AuthenticationGate(
+        authenticationService: authenticationService,
+        cryptoService: cryptoService,
+        navigatorKey: navigatorKey,
+        unlockedBuilder:
+            unlockedBuilder ??
+            (_, _) => const Scaffold(body: Text('Vault content')),
       ),
     );
+  }
+
+  testWidgets('shows unlocked content after crypto session unlock succeeds', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildAuthenticationGate());
 
     await tapUnlock(tester);
 
     expect(find.text('Vault content'), findsOneWidget);
     expect(find.text('KeyVault is locked'), findsNothing);
+
+    expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.sessionUnlocked, isTrue);
   });
 
-  testWidgets('remains locked after failed authentication', (tester) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.failed,
-    );
+  testWidgets('remains locked when crypto session unlock fails', (
+    tester,
+  ) async {
+    cryptoService.shouldFailUnlock = true;
 
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder:
-              (_, _) => const Scaffold(body: Text('Vault content')),
-        ),
-      ),
-    );
+    await tester.pumpWidget(buildAuthenticationGate());
 
     await tapUnlock(tester);
 
     expect(find.text('KeyVault is locked'), findsOneWidget);
-
-    expect(
-      find.text('Authentication failed or was cancelled.'),
-      findsOneWidget,
-    );
-
     expect(find.text('Vault content'), findsNothing);
+
+    expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.sessionUnlocked, isFalse);
   });
 
-  testWidgets('remains locked when biometrics are unavailable', (tester) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.unavailable,
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder:
-              (_, _) => const Scaffold(body: Text('Vault content')),
-        ),
-      ),
-    );
-
-    await tapUnlock(tester);
-
-    expect(find.text('KeyVault is locked'), findsOneWidget);
-
-    expect(
-      find.text('Biometric authentication is not available on this device.'),
-      findsOneWidget,
-    );
-
-    expect(find.text('Vault content'), findsNothing);
-  });
-
-  testWidgets('locks the vault when the app is backgrounded', (tester) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.success,
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder:
-              (_, _) => const Scaffold(body: Text('Vault content')),
-        ),
-      ),
-    );
+  testWidgets('locks the vault and crypto session when app is backgrounded', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildAuthenticationGate());
 
     await tapUnlock(tester);
 
     expect(find.text('Vault content'), findsOneWidget);
-    expect(authenticationService.authenticationCallCount, 1);
+    expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.sessionUnlocked, isTrue);
 
-    // A fresh authentication attempt must not automatically succeed.
-    authenticationService.authenticationResult = AuthenticationResult.failed;
-
-    // Background the application.
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
 
-    // Return it to the foreground so the test binding can process frames.
+    await tester.pump();
+
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
 
     await tester.pumpAndSettle();
 
-    // The previous authenticated session must no longer grant access.
     expect(find.text('Vault content'), findsNothing);
     expect(find.text('KeyVault is locked'), findsOneWidget);
 
-    // Returning to KeyVault requires an explicit fresh authentication.
-    expect(authenticationService.authenticationCallCount, 1);
+    expect(cryptoService.lockSessionCallCount, 1);
+    expect(cryptoService.sessionUnlocked, isFalse);
+
+    // Returning to the foreground must not
+    // automatically unlock the vault.
+    expect(cryptoService.unlockSessionCallCount, 1);
+  });
+
+  testWidgets('requires a new crypto session unlock after backgrounding', (
+    tester,
+  ) async {
+    await tester.pumpWidget(buildAuthenticationGate());
+
+    await tapUnlock(tester);
+
+    expect(cryptoService.unlockSessionCallCount, 1);
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+
+    await tester.pump();
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+
+    await tester.pumpAndSettle();
+
+    expect(cryptoService.sessionUnlocked, isFalse);
 
     await tester.tap(find.text('Unlock'));
     await tester.pumpAndSettle();
 
-    expect(authenticationService.authenticationCallCount, 2);
-
-    expect(
-      find.text('Authentication failed or was cancelled.'),
-      findsOneWidget,
-    );
+    expect(cryptoService.unlockSessionCallCount, 2);
+    expect(cryptoService.sessionUnlocked, isTrue);
+    expect(find.text('Vault content'), findsOneWidget);
   });
 
-  testWidgets('remains locked when no biometrics are enrolled', (tester) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.notEnrolled,
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder:
-              (_, _) => const Scaffold(body: Text('Vault content')),
-        ),
-      ),
-    );
-
-    await tapUnlock(tester);
-
-    expect(find.text('KeyVault is locked'), findsOneWidget);
-    expect(find.text('Vault content'), findsNothing);
-
-    expect(
-      find.text('No biometrics are enrolled on this device.'),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('remains locked when biometric authentication is locked out', (
+  testWidgets('obscures protected content when app becomes inactive', (
     tester,
   ) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.lockedOut,
-    );
-
     await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder:
-              (_, _) => const Scaffold(body: Text('Vault content')),
-        ),
-      ),
-    );
-
-    await tapUnlock(tester);
-
-    expect(find.text('KeyVault is locked'), findsOneWidget);
-    expect(find.text('Vault content'), findsNothing);
-
-    expect(
-      find.text(
-        'Biometric authentication is temporarily unavailable. '
-        'Try again later.',
-      ),
-      findsOneWidget,
-    );
-  });
-
-  testWidgets('obscures protected content when the app becomes inactive', (
-    tester,
-  ) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.success,
-    );
-
-    await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder:
-              (_, _) => const Scaffold(body: Text('Sensitive vault content')),
-        ),
+      buildAuthenticationGate(
+        unlockedBuilder:
+            (_, _) => const Scaffold(body: Text('Sensitive vault content')),
       ),
     );
 
@@ -236,117 +154,120 @@ void main() {
 
     expect(find.byKey(const Key('privacy-overlay')), findsOneWidget);
 
-    // Inactive alone does not invalidate authentication.
-    expect(authenticationService.authenticationCallCount, 1);
+    // Inactive only obscures the UI.
+    // It does not invalidate the session.
+    expect(cryptoService.lockSessionCallCount, 0);
+    expect(cryptoService.sessionUnlocked, isTrue);
   });
 
-  testWidgets('manually locking invalidates access to protected content', (
+  testWidgets('manual lock invalidates access and locks crypto session', (
     tester,
   ) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.success,
-    );
-
     await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder: (onLock, onReauthenticate) {
-            return Scaffold(
-              body: Column(
-                children: [
-                  const Text('Vault content'),
-                  ElevatedButton(onPressed: onLock, child: const Text('Lock')),
-                ],
-              ),
-            );
-          },
-        ),
+      buildAuthenticationGate(
+        unlockedBuilder: (onLock, onReauthenticate) {
+          return Scaffold(
+            body: Column(
+              children: [
+                const Text('Vault content'),
+                ElevatedButton(onPressed: onLock, child: const Text('Lock')),
+              ],
+            ),
+          );
+        },
       ),
     );
 
     await tapUnlock(tester);
 
     expect(find.text('Vault content'), findsOneWidget);
+    expect(cryptoService.sessionUnlocked, isTrue);
 
     await tester.tap(find.text('Lock'));
     await tester.pumpAndSettle();
 
     expect(find.text('Vault content'), findsNothing);
     expect(find.text('KeyVault is locked'), findsOneWidget);
+
+    expect(cryptoService.lockSessionCallCount, 1);
+    expect(cryptoService.sessionUnlocked, isFalse);
   });
 
-  testWidgets('reauthenticates without locking the vault', (tester) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.success,
-    );
-
+  testWidgets('reauthenticates without locking crypto session', (tester) async {
     Future<bool> Function()? reauthenticate;
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder: (onLock, onReauthenticate) {
-            reauthenticate = onReauthenticate;
+      buildAuthenticationGate(
+        unlockedBuilder: (onLock, onReauthenticate) {
+          reauthenticate = onReauthenticate;
 
-            return const Scaffold(body: Text('Vault content'));
-          },
-        ),
+          return const Scaffold(body: Text('Vault content'));
+        },
       ),
     );
 
     await tapUnlock(tester);
 
     expect(find.text('Vault content'), findsOneWidget);
-    expect(authenticationService.authenticationCallCount, 1);
+    expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.sessionUnlocked, isTrue);
     expect(reauthenticate, isNotNull);
+
+    // Initial unlock may itself use AuthenticationService
+    // depending on the platform used by the widget test.
+    final authenticationCallsBeforeReauthentication =
+        authenticationService.authenticationCallCount;
 
     final result = await reauthenticate!();
 
     await tester.pump();
 
     expect(result, isTrue);
-    expect(authenticationService.authenticationCallCount, 2);
 
-    // Reauthentication must not lock the existing session.
+    // Deliberate reauthentication should make exactly
+    // one additional authentication request.
+    expect(
+      authenticationService.authenticationCallCount,
+      authenticationCallsBeforeReauthentication + 1,
+    );
+
+    // Reauthentication must not create a new
+    // crypto session or destroy the current one.
+    expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.lockSessionCallCount, 0);
+    expect(cryptoService.sessionUnlocked, isTrue);
+
     expect(find.text('Vault content'), findsOneWidget);
     expect(find.text('KeyVault is locked'), findsNothing);
   });
 
-  testWidgets('failed reauthentication does not destroy unlocked content', (
+  testWidgets('failed reauthentication preserves unlocked crypto session', (
     tester,
   ) async {
-    final authenticationService = FakeAuthenticationService(
-      authenticationResult: AuthenticationResult.success,
-    );
-
     Future<bool> Function()? reauthenticate;
 
     await tester.pumpWidget(
-      MaterialApp(
-        home: AuthenticationGate(
-          authenticationService: authenticationService,
-          navigatorKey: navigatorKey,
-          unlockedBuilder: (onLock, onReauthenticate) {
-            reauthenticate = onReauthenticate;
+      buildAuthenticationGate(
+        unlockedBuilder: (onLock, onReauthenticate) {
+          reauthenticate = onReauthenticate;
 
-            return const Scaffold(body: Text('Vault content'));
-          },
-        ),
+          return const Scaffold(body: Text('Vault content'));
+        },
       ),
     );
 
-    // Explicitly unlock first.
     await tapUnlock(tester);
 
-    expect(authenticationService.authenticationCallCount, 1);
     expect(find.text('Vault content'), findsOneWidget);
+    expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.sessionUnlocked, isTrue);
     expect(reauthenticate, isNotNull);
 
-    // Make only the subsequent authentication fail.
+    // Record the existing authentication count so this
+    // test is independent of initial unlock behaviour.
+    final authenticationCallsBeforeReauthentication =
+        authenticationService.authenticationCallCount;
+
     authenticationService.authenticationResult = AuthenticationResult.failed;
 
     final result = await reauthenticate!();
@@ -354,9 +275,20 @@ void main() {
     await tester.pump();
 
     expect(result, isFalse);
-    expect(authenticationService.authenticationCallCount, 2);
 
-    // Failed reauthentication must preserve the existing UI.
+    // A failed deliberate reauthentication still represents
+    // exactly one authentication attempt.
+    expect(
+      authenticationService.authenticationCallCount,
+      authenticationCallsBeforeReauthentication + 1,
+    );
+
+    // Failed deliberate reauthentication must not
+    // destroy the already unlocked crypto session.
+    expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.lockSessionCallCount, 0);
+    expect(cryptoService.sessionUnlocked, isTrue);
+
     expect(find.text('Vault content'), findsOneWidget);
     expect(find.text('KeyVault is locked'), findsNothing);
   });

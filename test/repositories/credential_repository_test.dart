@@ -45,6 +45,9 @@ void main() {
     expect(credentials.first.username, credential.username);
     expect(credentials.first.password, credential.password);
     expect(credentials.first.website, credential.website);
+
+    expect(cryptoService.encryptCallCount, 1);
+    expect(cryptoService.decryptCallCount, 1);
   });
 
   test('stored vault does not contain plaintext credential data', () async {
@@ -65,14 +68,12 @@ void main() {
     final storedVault = storageService.storedValue;
 
     expect(storedVault, isNotNull);
-
     expect(storedVault, isNot(contains('Sensitive Service')));
-
     expect(storedVault, isNot(contains('secret@example.com')));
-
     expect(storedVault, isNot(contains('VerySecretPassword123!')));
-
     expect(storedVault, isNot(contains('sensitive.example.com')));
+
+    expect(cryptoService.encryptCallCount, 1);
   });
 
   test('updates an existing credential', () async {
@@ -100,6 +101,9 @@ void main() {
 
     expect(credentials.length, 1);
     expect(credentials.first.password, 'NewPassword');
+
+    expect(cryptoService.encryptCallCount, 2);
+    expect(cryptoService.decryptCallCount, 2);
   });
 
   test('deletes an existing credential', () async {
@@ -121,12 +125,18 @@ void main() {
     final credentials = await repository.getCredentials();
 
     expect(credentials, isEmpty);
+
+    expect(cryptoService.encryptCallCount, 2);
+    expect(cryptoService.decryptCallCount, 2);
   });
 
   test('returns an empty list when no vault exists', () async {
     final credentials = await repository.getCredentials();
 
     expect(credentials, isEmpty);
+
+    expect(cryptoService.decryptCallCount, 0);
+    expect(cryptoService.encryptCallCount, 0);
   });
 
   test('fails securely when encrypted vault cannot be decrypted', () async {
@@ -147,13 +157,13 @@ void main() {
 
     cryptoService.shouldFailDecryption = true;
 
-    expect(
-      () => repository.getCredentials(),
+    await expectLater(
+      repository.getCredentials(),
       throwsA(isA<VaultAccessException>()),
     );
 
-    // Existing encrypted data must remain untouched.
     expect(storageService.storedValue, originalVault);
+    expect(cryptoService.decryptCallCount, 1);
   });
 
   test('reset deletes the encrypted vault and encryption key', () async {
@@ -202,13 +212,13 @@ void main() {
 
       cryptoService.shouldRequireAuthentication = true;
 
-      expect(
-        () => repository.getCredentials(),
+      await expectLater(
+        repository.getCredentials(),
         throwsA(isA<AuthenticationRequiredException>()),
       );
 
-      // Authentication failure must not modify or delete the vault.
       expect(storageService.storedValue, originalVault);
+      expect(cryptoService.decryptCallCount, 1);
     },
   );
 }

@@ -1,13 +1,16 @@
-import 'package:flutter/material.dart';
-import 'package:key_vault/models/authentication_result.dart';
-import 'package:flutter/services.dart';
 import 'dart:async';
 
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:key_vault/models/authentication_result.dart';
+
 import '../services/authentication_service.dart';
+import '../services/native_crypto_service.dart';
 import 'lock_screen.dart';
 
 class AuthenticationGate extends StatefulWidget {
   final AuthenticationService authenticationService;
+  final NativeCryptoService cryptoService;
   final GlobalKey<NavigatorState> navigatorKey;
   final Widget Function(
     VoidCallback onLock,
@@ -18,6 +21,7 @@ class AuthenticationGate extends StatefulWidget {
   const AuthenticationGate({
     super.key,
     required this.authenticationService,
+    required this.cryptoService,
     required this.navigatorKey,
     required this.unlockedBuilder,
   });
@@ -31,6 +35,7 @@ class _AuthenticationGateState extends State<AuthenticationGate>
   bool _isUnlocked = false;
   bool _showPrivacyOverlay = false;
   bool _didEnterBackground = false;
+
   static const _privacyChannel = MethodChannel(
     'com.oluwakemimafe.keyvault/privacy',
   );
@@ -47,7 +52,9 @@ class _AuthenticationGateState extends State<AuthenticationGate>
     super.dispose();
   }
 
-  void _unlock() {
+  Future<void> _unlock() async {
+    await widget.cryptoService.unlockSession();
+
     if (!mounted) return;
 
     setState(() {
@@ -55,8 +62,16 @@ class _AuthenticationGateState extends State<AuthenticationGate>
     });
   }
 
-  void _lock() {
-    if (!mounted || !_isUnlocked) return;
+  Future<void> _lock() async {
+    if (!_isUnlocked) return;
+
+    try {
+      await widget.cryptoService.lockSession();
+    } catch (_) {
+      // Continue locking the Flutter UI even if native session cleanup fails.
+    }
+
+    if (!mounted) return;
 
     widget.navigatorKey.currentState?.popUntil((route) => route.isFirst);
 
@@ -124,18 +139,23 @@ class _AuthenticationGateState extends State<AuthenticationGate>
           _showPrivacyOverlay = true;
         });
         break;
+
       case AppLifecycleState.hidden:
       case AppLifecycleState.paused:
         _didEnterBackground = true;
+
         setState(() {
           _showPrivacyOverlay = true;
         });
-        _lock();
+
+        unawaited(_lock());
         break;
+
       case AppLifecycleState.detached:
         _didEnterBackground = true;
-        _lock();
+        unawaited(_lock());
         break;
+
       case AppLifecycleState.resumed:
         if (_didEnterBackground) {
           _didEnterBackground = false;
@@ -143,7 +163,6 @@ class _AuthenticationGateState extends State<AuthenticationGate>
         } else {
           _revealAfterTemporaryInactivity();
         }
-
         break;
     }
   }
@@ -151,19 +170,22 @@ class _AuthenticationGateState extends State<AuthenticationGate>
   @override
   Widget build(BuildContext context) {
     final Widget content;
+
     if (!_isUnlocked) {
       content = LockScreen(
         authenticationService: widget.authenticationService,
+        cryptoService: widget.cryptoService,
         onAuthenticated: _unlock,
       );
     } else {
-      content = widget.unlockedBuilder(_lock, _reAuthenticate);
+      content = widget.unlockedBuilder(() {
+        unawaited(_lock());
+      }, _reAuthenticate);
     }
 
     return Stack(
       children: [
         content,
-
         if (_showPrivacyOverlay)
           const Positioned.fill(
             child: ColoredBox(key: Key('privacy-overlay'), color: Colors.black),

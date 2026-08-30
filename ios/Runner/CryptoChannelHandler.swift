@@ -10,8 +10,10 @@ import Foundation
 
 final class CryptoChannelHandler {
     private let cryptoService: CryptoServicing
-    
-    init( cryptoService: CryptoServicing = CryptoService()) {
+
+    init(
+        cryptoService: CryptoServicing = CryptoService()
+    ) {
         self.cryptoService = cryptoService
     }
 
@@ -21,19 +23,42 @@ final class CryptoChannelHandler {
     ) {
         do {
             switch call.method {
+
+            case "unlockSession":
+                try cryptoService.unlockSession()
+                result(nil)
+
+            case "lockSession":
+                cryptoService.lockSession()
+                result(nil)
+
             case "encrypt":
-                try encrypt(call: call, result: result)
+                try encrypt(
+                    call: call,
+                    result: result
+                )
 
             case "decrypt":
-                try decrypt(call: call, result: result)
+                try decrypt(
+                    call: call,
+                    result: result
+                )
 
             case "deleteKey":
                 try cryptoService.deleteKey()
                 result(nil)
+                
+            case "isSimulator":
+                #if targetEnvironment(simulator)
+                result(true)
+                #else
+                result(false)
+                #endif
 
             default:
                 result(FlutterMethodNotImplemented)
             }
+
         } catch CryptoServiceError.authenticationRequired {
             result(
                 FlutterError(
@@ -65,7 +90,9 @@ final class CryptoChannelHandler {
         }
 
         result(
-            try cryptoService.encrypt(plainText)
+            try cryptoService.encrypt(
+                plainText
+            )
         )
     }
 

@@ -32,6 +32,8 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
   bool _obscurePassword = true;
   bool _isSaving = false;
 
+  bool get _isEditing => widget.credential != null;
+
   @override
   void initState() {
     super.initState();
@@ -68,7 +70,7 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
     final credential = _buildCredential();
 
     try {
-      final saved = await _saveCredentialWithReauthentication(credential);
+      final saved = await _saveCredential(credential);
 
       if (!saved || !mounted) {
         return;
@@ -87,7 +89,7 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
   Credential _buildCredential() {
     final now = DateTime.now();
 
-    if (widget.credential == null) {
+    if (!_isEditing) {
       return Credential(
         id: const Uuid().v4(),
         serviceName: _serviceController.text.trim(),
@@ -116,13 +118,72 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
     );
   }
 
-  Future<bool> _saveCredentialWithReauthentication(
-    Credential credential,
-  ) async {
+  Future<bool> _saveCredential(Credential credential) async {
+    /*
+     * Editing an existing credential is a deliberate
+     * sensitive operation and therefore requires
+     * reauthentication before the update is attempted.
+     */
+    if (_isEditing) {
+      final authenticated = await widget.onReauthenticate();
+
+      if (!authenticated) {
+        if (!mounted) {
+          return false;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Authentication is required to edit this credential.',
+            ),
+          ),
+        );
+
+        return false;
+      }
+
+      try {
+        await _persistCredential(credential);
+
+        return true;
+      } on AuthenticationRequiredException {
+        /*
+         * Authentication has already been deliberately
+         * requested for Edit. Do not repeatedly prompt.
+         */
+        if (!mounted) {
+          return false;
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Authentication is required to access the vault.'),
+          ),
+        );
+
+        return false;
+      }
+    }
+
+    /*
+     * Adding a credential normally requires no additional
+     * authentication because the vault has already been
+     * unlocked.
+     *
+     * Android Keystore authentication can expire while the
+     * user is completing the form. Therefore, first attempt
+     * the save without another prompt.
+     */
     try {
       await _persistCredential(credential);
       return true;
     } on AuthenticationRequiredException {
+      /*
+       * The platform key is no longer authorized.
+       * Request authentication only when it is actually
+       * required, then retry the save once.
+       */
       final authenticated = await widget.onReauthenticate();
 
       if (!authenticated) {
@@ -141,18 +202,56 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
         return false;
       }
 
-      // Authentication succeeded. Retry exactly once.
-      await _persistCredential(credential);
+      try {
+        await _persistCredential(credential);
+        return true;
+      } on AuthenticationRequiredException {
+        /*
+         * Do not enter an authentication retry loop if the
+         * platform still refuses access after reauthentication.
+         */
+        if (!mounted) {
+          return false;
+        }
 
-      return true;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Authentication is required to access the vault.'),
+          ),
+        );
+
+        return false;
+      }
     }
   }
 
   Future<void> _persistCredential(Credential credential) async {
-    if (widget.credential == null) {
-      await widget.repository.addCredential(credential);
-    } else {
-      await widget.repository.updateCredential(credential);
+    final stopwatch = Stopwatch()..start();
+
+    try {
+      if (!_isEditing) {
+        await widget.repository.addCredential(credential);
+
+        stopwatch.stop();
+
+        debugPrint(
+          'PERF add_credential: '
+          '${stopwatch.elapsedMicroseconds / 1000} ms',
+        );
+      } else {
+        await widget.repository.updateCredential(credential);
+
+        stopwatch.stop();
+
+        debugPrint(
+          'PERF edit_credential: '
+          '${stopwatch.elapsedMicroseconds / 1000} ms',
+        );
+      }
+    } finally {
+      if (stopwatch.isRunning) {
+        stopwatch.stop();
+      }
     }
   }
 
@@ -160,9 +259,7 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          widget.credential == null ? 'Add Credential' : 'Edit Credential',
-        ),
+        title: Text(_isEditing ? 'Edit Credential' : 'Add Credential'),
       ),
       body: SafeArea(
         child: Form(
@@ -201,14 +298,13 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
               const SizedBox(height: 16),
               TextFormField(
                 controller: _passwordController,
-                obscureText:
-                    widget.credential == null ? _obscurePassword : false,
+                obscureText: !_isEditing ? _obscurePassword : false,
                 enableSuggestions: false,
                 autocorrect: false,
                 decoration: InputDecoration(
                   labelText: 'Password',
                   suffixIcon:
-                      widget.credential == null
+                      !_isEditing
                           ? IconButton(
                             onPressed: () {
                               setState(() {

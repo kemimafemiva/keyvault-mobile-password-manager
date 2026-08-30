@@ -7,7 +7,6 @@ import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
-import android.security.keystore.UserNotAuthenticatedException
 
 @RunWith(AndroidJUnit4::class)
 class CryptoServiceTest {
@@ -29,10 +28,68 @@ class CryptoServiceTest {
     }
 
     @Test
+    fun unlockSessionAllowsSubsequentEncryptionAndDecryption() {
+        cryptoService.unlockSession()
+
+        val plainText = "TestPassword123!"
+
+        val encrypted = cryptoService.encrypt(
+            plainText
+        )
+
+        val cipherText =
+            encrypted["cipherText"] as List<*>
+
+        val nonce =
+            encrypted["nonce"] as List<*>
+
+        val mac =
+            encrypted["mac"] as List<*>
+
+        val decrypted = cryptoService.decrypt(
+            cipherText.toByteArray(),
+            nonce.toByteArray(),
+            mac.toByteArray()
+        )
+
+        assertEquals(
+            plainText,
+            decrypted
+        )
+    }
+
+    @Test
+    fun lockSessionDoesNotInvalidateAndroidKeystoreKey() {
+        cryptoService.unlockSession()
+
+        val encrypted = cryptoService.encrypt(
+            "TestPassword123!"
+        )
+
+        cryptoService.lockSession()
+
+        val decrypted = cryptoService.decrypt(
+            (encrypted["cipherText"] as List<*>)
+                .toByteArray(),
+            (encrypted["nonce"] as List<*>)
+                .toByteArray(),
+            (encrypted["mac"] as List<*>)
+                .toByteArray()
+        )
+
+        assertEquals(
+            "TestPassword123!",
+            decrypted
+        )
+    }
+
+    @Test
     fun encryptAndDecryptReturnsOriginalPlainText() {
         val plainText = "TestPassword123!"
 
-        val encrypted = cryptoService.encrypt(plainText)
+        val encrypted = cryptoService.encrypt(
+            plainText
+        )
 
         val cipherText =
             encrypted["cipherText"] as List<*>
@@ -58,7 +115,9 @@ class CryptoServiceTest {
     @Test
     fun decryptRejectsModifiedCipherText() {
         val encrypted =
-            cryptoService.encrypt("TestPassword123!")
+            cryptoService.encrypt(
+                "TestPassword123!"
+            )
 
         val cipherText =
             (encrypted["cipherText"] as List<*>)
@@ -72,9 +131,9 @@ class CryptoServiceTest {
             (encrypted["mac"] as List<*>)
                 .toByteArray()
 
-        // Deliberately corrupt one ciphertext byte.
         cipherText[0] =
-            (cipherText[0].toInt() xor 0x01).toByte()
+            (cipherText[0].toInt() xor 0x01)
+                .toByte()
 
         assertThrows(Exception::class.java) {
             cryptoService.decrypt(
@@ -88,7 +147,9 @@ class CryptoServiceTest {
     @Test
     fun decryptRejectsModifiedAuthenticationTag() {
         val encrypted =
-            cryptoService.encrypt("TestPassword123!")
+            cryptoService.encrypt(
+                "TestPassword123!"
+            )
 
         val cipherText =
             (encrypted["cipherText"] as List<*>)
@@ -102,9 +163,9 @@ class CryptoServiceTest {
             (encrypted["mac"] as List<*>)
                 .toByteArray()
 
-        // Deliberately corrupt the GCM authentication tag.
         mac[0] =
-            (mac[0].toInt() xor 0x01).toByte()
+            (mac[0].toInt() xor 0x01)
+                .toByte()
 
         assertThrows(Exception::class.java) {
             cryptoService.decrypt(
@@ -118,7 +179,9 @@ class CryptoServiceTest {
     @Test
     fun decryptRejectsModifiedNonce() {
         val encrypted =
-            cryptoService.encrypt("TestPassword123!")
+            cryptoService.encrypt(
+                "TestPassword123!"
+            )
 
         val cipherText =
             (encrypted["cipherText"] as List<*>)
@@ -132,9 +195,9 @@ class CryptoServiceTest {
             (encrypted["mac"] as List<*>)
                 .toByteArray()
 
-        // Deliberately corrupt the nonce.
         nonce[0] =
-            (nonce[0].toInt() xor 0x01).toByte()
+            (nonce[0].toInt() xor 0x01)
+                .toByte()
 
         assertThrows(Exception::class.java) {
             cryptoService.decrypt(
@@ -147,13 +210,12 @@ class CryptoServiceTest {
 
     @Test
     fun encryptionRequiresUserAuthentication() {
-        // Remove the non-authenticated key used by the
-        // other AES-GCM tests.
         cryptoService.deleteKey()
 
-        val protectedCryptoService = CryptoService(
-            requireAuthentication = true
-        )
+        val protectedCryptoService =
+            CryptoService(
+                requireAuthentication = true
+            )
 
         try {
             assertThrows(

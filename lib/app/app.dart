@@ -11,12 +11,15 @@ import '../services/authentication_service.dart';
 class KeyVaultApp extends StatelessWidget {
   KeyVaultApp({super.key});
 
-  final CredentialRepository _repository = CredentialRepository(
-    cryptoService: NativeCryptoService(),
+  final NativeCryptoService _cryptoService = NativeCryptoService();
+
+  late final CredentialRepository _repository = CredentialRepository(
+    cryptoService: _cryptoService,
     storageService: CredentialStorageService(),
   );
 
   final AuthenticationService _authenticationService = AuthenticationService();
+
   final navigatorKey = GlobalKey<NavigatorState>();
 
   @override
@@ -74,6 +77,7 @@ class KeyVaultApp extends StatelessWidget {
       ),
       home: AuthenticationGate(
         authenticationService: _authenticationService,
+        cryptoService: _cryptoService,
         navigatorKey: navigatorKey,
         unlockedBuilder: (onLock, onReauthenticate) {
           return VaultScreen(

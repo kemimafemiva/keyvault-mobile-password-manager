@@ -8,6 +8,22 @@ class NativeCryptoService {
     'com.oluwakemimafe.keyvault/crypto',
   );
 
+  Future<void> unlockSession() async {
+    try {
+      await _channel.invokeMethod<void>('unlockSession');
+    } on PlatformException catch (exception) {
+      if (exception.code == 'AUTHENTICATION_REQUIRED') {
+        throw const AuthenticationRequiredException();
+      }
+
+      rethrow;
+    }
+  }
+
+  Future<void> lockSession() async {
+    await _channel.invokeMethod<void>('lockSession');
+  }
+
   Future<EncryptedData> encrypt(String plainText) async {
     try {
       final result = await _channel.invokeMapMethod<String, dynamic>(
@@ -57,5 +73,11 @@ class NativeCryptoService {
 
   Future<void> deleteKey() {
     return _channel.invokeMethod<void>('deleteKey');
+  }
+
+  Future<bool> isSimulator() async {
+    final result = await _channel.invokeMethod<bool>('isSimulator');
+
+    return result ?? false;
   }
 }

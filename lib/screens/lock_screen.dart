@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:key_vault/models/authentication_result.dart';
+import 'package:key_vault/services/native_crypto_service.dart';
 import 'package:local_auth/local_auth.dart';
 
 import '../services/authentication_service.dart';
@@ -7,11 +10,13 @@ import '../theme/key_vault_theme.dart';
 
 class LockScreen extends StatefulWidget {
   final AuthenticationService authenticationService;
-  final VoidCallback onAuthenticated;
+  final NativeCryptoService cryptoService;
+  final Future<void> Function() onAuthenticated;
 
   const LockScreen({
     super.key,
     required this.authenticationService,
+    required this.cryptoService,
     required this.onAuthenticated,
   });
 
@@ -43,45 +48,52 @@ class _LockScreenState extends State<LockScreen> {
       _errorMessage = null;
     });
 
-    final result = await widget.authenticationService.authenticate();
+    final stopwatch = Stopwatch()..start();
 
-    if (!mounted) return;
+    try {
+      if (Platform.isIOS && !await widget.cryptoService.isSimulator()) {
+        /*
+   * On a physical iOS device, unlocking the crypto session
+   * retrieves the .userPresence-protected Keychain encryption
+   * key. Keychain therefore performs the authentication itself.
+   *
+   * The iOS Simulator does not consistently enforce the
+   * Keychain user-presence prompt, so it uses the local_auth
+   * flow below instead.
+   */
+        await widget.onAuthenticated();
+      } else {
+        final result = await widget.authenticationService.authenticate();
 
-    setState(() {
-      _isAuthenticating = false;
-    });
+        if (!mounted) return;
 
-    switch (result) {
-      case AuthenticationResult.success:
-        widget.onAuthenticated();
-        break;
+        if (result == AuthenticationResult.success) {
+          await widget.onAuthenticated();
+        } else {
+          setState(() {
+            _errorMessage = 'Authentication failed or was cancelled.';
+          });
+        }
+      }
+    } catch (_) {
+      if (!mounted) return;
 
-      case AuthenticationResult.notEnrolled:
+      setState(() {
+        _errorMessage = 'Authentication failed or was cancelled.';
+      });
+    } finally {
+      stopwatch.stop();
+
+      debugPrint(
+        'PERF vault_authentication: '
+        '${stopwatch.elapsedMicroseconds / 1000} ms',
+      );
+
+      if (mounted) {
         setState(() {
-          _errorMessage = 'No biometrics are enrolled on this device.';
+          _isAuthenticating = false;
         });
-        break;
-
-      case AuthenticationResult.lockedOut:
-        setState(() {
-          _errorMessage =
-              'Biometric authentication is temporarily unavailable. '
-              'Try again later.';
-        });
-        break;
-
-      case AuthenticationResult.unavailable:
-        setState(() {
-          _errorMessage =
-              'Biometric authentication is not available on this device.';
-        });
-        break;
-
-      case AuthenticationResult.failed:
-        setState(() {
-          _errorMessage = 'Authentication failed or was cancelled.';
-        });
-        break;
+      }
     }
   }
 
@@ -108,8 +120,10 @@ class _LockScreenState extends State<LockScreen> {
     switch (_biometricType) {
       case BiometricType.face:
         return Icons.face;
+
       case BiometricType.fingerprint:
         return Icons.fingerprint;
+
       default:
         return Icons.password;
     }

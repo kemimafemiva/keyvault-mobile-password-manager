@@ -3,30 +3,58 @@ package com.oluwakemimafe.key_vault
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 
-class CryptoChannelHandler (
-    private val cryptoService: CryptoService = CryptoService()
-){
+class CryptoChannelHandler(
+    private val cryptoService: CryptoService =
+        CryptoService()
+) {
+
     fun handle(
-    call: MethodCall,
-    result: MethodChannel.Result
+        call: MethodCall,
+        result: MethodChannel.Result
     ) {
         try {
             when (call.method) {
-                "encrypt" -> encrypt(call, result)
-                "decrypt" -> decrypt(call, result)
+                "unlockSession" -> {
+                    cryptoService.unlockSession()
+                    result.success(null)
+                }
+
+                "lockSession" -> {
+                    cryptoService.lockSession()
+                    result.success(null)
+                }
+
+                "encrypt" -> {
+                    encrypt(
+                        call,
+                        result
+                    )
+                }
+
+                "decrypt" -> {
+                    decrypt(
+                        call,
+                        result
+                    )
+                }
 
                 "deleteKey" -> {
                     cryptoService.deleteKey()
                     result.success(null)
                 }
 
-                else -> result.notImplemented()
+                else -> {
+                    result.notImplemented()
+                }
             }
-        } catch (exception: AuthenticationRequiredException) {
+        } catch (
+            exception: AuthenticationRequiredException
+        ) {
             result.error(
                 "AUTHENTICATION_REQUIRED",
                 exception.message,
-                null)
+                null
+            )
         } catch (exception: Exception) {
             result.error(
                 "CRYPTO_ERROR",
@@ -42,13 +70,17 @@ class CryptoChannelHandler (
         result: MethodChannel.Result
     ) {
         val plainText =
-            call.argument<String>("plainText")
+            call.argument<String>(
+                "plainText"
+            )
                 ?: throw IllegalArgumentException(
                     "plainText is required."
                 )
 
         result.success(
-            cryptoService.encrypt(plainText)
+            cryptoService.encrypt(
+                plainText
+            )
         )
     }
 
@@ -57,19 +89,25 @@ class CryptoChannelHandler (
         result: MethodChannel.Result
     ) {
         val cipherText =
-            call.argument<List<Int>>("cipherText")
+            call.argument<List<Int>>(
+                "cipherText"
+            )
                 ?: throw IllegalArgumentException(
                     "cipherText is required."
                 )
 
         val nonce =
-            call.argument<List<Int>>("nonce")
+            call.argument<List<Int>>(
+                "nonce"
+            )
                 ?: throw IllegalArgumentException(
                     "nonce is required."
                 )
 
         val mac =
-            call.argument<List<Int>>("mac")
+            call.argument<List<Int>>(
+                "mac"
+            )
                 ?: throw IllegalArgumentException(
                     "mac is required."
                 )

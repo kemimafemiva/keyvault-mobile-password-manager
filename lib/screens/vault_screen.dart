@@ -46,12 +46,21 @@ class _VaultScreenState extends State<VaultScreen> {
 
   Future<void> _loadCredentials() async {
     try {
+      final stopwatch = Stopwatch()..start();
       final credentials = await widget.repository.getCredentials();
+
+      stopwatch.stop();
+
+      debugPrint(
+        'PERF credential_retrieval: '
+        '${stopwatch.elapsedMicroseconds / 1000} ms',
+      );
 
       if (!mounted) return;
 
       setState(() {
         _credentials = credentials;
+        _loadError = null;
       });
     } on AuthenticationRequiredException {
       if (!mounted) return;
@@ -199,7 +208,7 @@ class _VaultScreenState extends State<VaultScreen> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Icon(
-                Icons.key_outlined,
+                Icons.lock_outline,
                 size: 64,
                 color: Theme.of(context).colorScheme.primary,
               ),
@@ -245,7 +254,7 @@ class _VaultScreenState extends State<VaultScreen> {
               borderRadius: BorderRadius.circular(12),
             ),
             child: Icon(
-              Icons.key_outlined,
+              Icons.account_circle_outlined,
               color: Theme.of(context).colorScheme.primary,
               size: 22,
             ),
