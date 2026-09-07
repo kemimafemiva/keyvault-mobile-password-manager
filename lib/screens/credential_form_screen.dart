@@ -8,12 +8,14 @@ import '../repositories/credential_repository.dart';
 class CredentialFormScreen extends StatefulWidget {
   final CredentialRepository repository;
   final Future<bool> Function() onReauthenticate;
+  final Future<bool> Function() onSessionExpired;
   final Credential? credential;
 
   const CredentialFormScreen({
     super.key,
     required this.repository,
     required this.onReauthenticate,
+    required this.onSessionExpired,
     this.credential,
   });
 
@@ -22,6 +24,14 @@ class CredentialFormScreen extends StatefulWidget {
 }
 
 class _CredentialFormScreenState extends State<CredentialFormScreen> {
+  static const int _minimumServiceNameLength = 2;
+  static const int _maximumServiceNameLength = 100;
+  static const int _minimumUsernameOrEmailLength = 2;
+  static const int _maximumUsernameOrEmailLength = 254;
+  static const int _minimumPasswordLength = 8;
+  static const int _maximumPasswordLength = 128;
+  static const int _maximumWebsiteLength = 2048;
+
   final _formKey = GlobalKey<FormState>();
 
   final _serviceController = TextEditingController();
@@ -31,8 +41,6 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
 
   bool _obscurePassword = true;
   bool _isSaving = false;
-
-  bool get _isEditing => widget.credential != null;
 
   @override
   void initState() {
@@ -58,32 +66,18 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
     super.dispose();
   }
 
-  Future<void> _save() async {
-    if (!_formKey.currentState!.validate()) {
-      return;
-    }
+  bool get _isEditing => widget.credential != null;
 
-    setState(() {
-      _isSaving = true;
-    });
+  bool _containsUppercase(String password) {
+    return RegExp(r'[A-Z]').hasMatch(password);
+  }
 
-    final credential = _buildCredential();
+  bool _containsNumber(String password) {
+    return RegExp(r'[0-9]').hasMatch(password);
+  }
 
-    try {
-      final saved = await _saveCredential(credential);
-
-      if (!saved || !mounted) {
-        return;
-      }
-
-      Navigator.of(context).pop(credential);
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSaving = false;
-        });
-      }
-    }
+  bool _containsSpecialCharacter(String password) {
+    return RegExp(r'[^A-Za-z0-9\s]').hasMatch(password);
   }
 
   Credential _buildCredential() {
@@ -116,6 +110,141 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
       createdAt: widget.credential!.createdAt,
       updatedAt: now,
     );
+  }
+
+  String? _validateServiceName(String? value) {
+    final input = value?.trim() ?? '';
+    final issues = <String>[];
+
+    if (input.length < _minimumServiceNameLength) {
+      issues.add('at least $_minimumServiceNameLength characters');
+    }
+
+    if (input.length > _maximumServiceNameLength) {
+      issues.add('no more than $_maximumServiceNameLength characters');
+    }
+
+    if (issues.isEmpty) {
+      return null;
+    }
+
+    return 'Service name must include:\n'
+        '${issues.map((issue) => '• $issue').join('\n')}';
+  }
+
+  String? _validateUsernameOrEmail(String? value) {
+    final input = value?.trim() ?? '';
+    final issues = <String>[];
+
+    if (input.length < _minimumUsernameOrEmailLength) {
+      issues.add('at least $_minimumUsernameOrEmailLength characters');
+    }
+
+    if (input.length > _maximumUsernameOrEmailLength) {
+      issues.add('no more than $_maximumUsernameOrEmailLength characters');
+    }
+
+    if (issues.isEmpty) {
+      return null;
+    }
+
+    return 'Username or email must include:\n'
+        '${issues.map((issue) => '• $issue').join('\n')}';
+  }
+
+  String? _validatePassword(String? value) {
+    final password = value ?? '';
+    final issues = <String>[];
+
+    if (password.length < _minimumPasswordLength) {
+      issues.add('at least $_minimumPasswordLength characters');
+    }
+
+    if (password.length > _maximumPasswordLength) {
+      issues.add('no more than $_maximumPasswordLength characters');
+    }
+
+    if (!_containsUppercase(password)) {
+      issues.add('an uppercase letter');
+    }
+
+    if (!_containsNumber(password)) {
+      issues.add('a number');
+    }
+
+    if (!_containsSpecialCharacter(password)) {
+      issues.add('a special character');
+    }
+
+    if (issues.isEmpty) {
+      return null;
+    }
+
+    return 'Password must include:\n'
+        '${issues.map((issue) => '• $issue').join('\n')}';
+  }
+
+  String? _validateWebsite(String? value) {
+    final input = value?.trim() ?? '';
+
+    // Website is optional.
+    if (input.isEmpty) {
+      return null;
+    }
+
+    final issues = <String>[];
+
+    if (input.length > _maximumWebsiteLength) {
+      issues.add('no more than $_maximumWebsiteLength characters');
+    }
+
+    final uri = Uri.tryParse(input);
+
+    final hasValidUrl =
+        uri != null &&
+        uri.hasAuthority &&
+        uri.host.isNotEmpty &&
+        (uri.scheme.toLowerCase() == 'http' ||
+            uri.scheme.toLowerCase() == 'https');
+
+    if (!hasValidUrl) {
+      issues.add('a valid URL starting with http:// or https://');
+    }
+
+    if (issues.isEmpty) {
+      return null;
+    }
+
+    return 'Website must include:\n'
+        '${issues.map((issue) => '• $issue').join('\n')}';
+  }
+
+  Future<void> _save() async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    setState(() {
+      _isSaving = true;
+    });
+
+    final credential = _buildCredential();
+
+    try {
+      final saved = await _saveCredential(credential);
+
+      if (!saved || !mounted) {
+        return;
+      }
+
+      Navigator.of(context).pop(credential);
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSaving = false;
+        });
+      }
+    }
   }
 
   Future<bool> _saveCredential(Credential credential) async {
@@ -184,7 +313,7 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
        * Request authentication only when it is actually
        * required, then retry the save once.
        */
-      final authenticated = await widget.onReauthenticate();
+      final authenticated = await widget.onSessionExpired();
 
       if (!authenticated) {
         if (!mounted) {
@@ -269,31 +398,26 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
             children: [
               TextFormField(
                 controller: _serviceController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Service',
                   hintText: 'e.g. Gmail',
+                  helperText:
+                      '$_minimumServiceNameLength–'
+                      '$_maximumServiceNameLength characters.',
                 ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Enter a service name.';
-                  }
-
-                  return null;
-                },
+                validator: _validateServiceName,
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _usernameController,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Username or email',
+                  helperText:
+                      '$_minimumUsernameOrEmailLength–'
+                      '$_maximumUsernameOrEmailLength characters.',
+                  errorMaxLines: 4,
                 ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) {
-                    return 'Enter a username or email.';
-                  }
-
-                  return null;
-                },
+                validator: _validateUsernameOrEmail,
               ),
               const SizedBox(height: 16),
               TextFormField(
@@ -303,6 +427,12 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
                 autocorrect: false,
                 decoration: InputDecoration(
                   labelText: 'Password',
+                  helperText:
+                      '$_minimumPasswordLength–$_maximumPasswordLength characters, '
+                      'including an uppercase letter, a number, '
+                      'and a special character.',
+                  helperMaxLines: 2,
+                  errorMaxLines: 6,
                   suffixIcon:
                       !_isEditing
                           ? IconButton(
@@ -319,22 +449,19 @@ class _CredentialFormScreenState extends State<CredentialFormScreen> {
                           )
                           : null,
                 ),
-                validator: (value) {
-                  if (value == null || value.isEmpty) {
-                    return 'Enter a password.';
-                  }
-
-                  return null;
-                },
+                validator: _validatePassword,
               ),
               const SizedBox(height: 16),
               TextFormField(
                 controller: _websiteController,
                 keyboardType: TextInputType.url,
-                decoration: const InputDecoration(
+                decoration: InputDecoration(
                   labelText: 'Website (optional)',
                   hintText: 'https://example.com',
+                  helperText: 'Maximum $_maximumWebsiteLength characters.',
+                  errorMaxLines: 4,
                 ),
+                validator: _validateWebsite,
               ),
               const SizedBox(height: 24),
               FilledButton(

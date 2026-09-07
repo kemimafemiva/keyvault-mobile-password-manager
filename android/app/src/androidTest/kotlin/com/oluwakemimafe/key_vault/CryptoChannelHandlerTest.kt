@@ -1,4 +1,4 @@
-\package com.oluwakemimafe.key_vault
+package com.oluwakemimafe.key_vault
 
 import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
@@ -31,6 +31,34 @@ class CryptoChannelHandlerTest {
 
         assertTrue(
             cryptoService.unlockSessionCalled
+        )
+        assertNull(result.errorCode)
+        assertFalse(
+            result.notImplementedCalled
+        )
+    }
+
+    @Test
+    fun renewSessionDelegatesToCryptoService() {
+        val cryptoService =
+            FakeCryptoService()
+
+        val handler =
+            CryptoChannelHandler(
+                cryptoService
+            )
+
+        val call = MethodCall(
+            "renewSession",
+            null
+        )
+
+        val result = TestResult()
+
+        handler.handle(call, result)
+
+        assertTrue(
+            cryptoService.renewSessionCalled
         )
         assertNull(result.errorCode)
         assertFalse(
@@ -208,6 +236,9 @@ private class FakeCryptoService(
     var unlockSessionCalled = false
         private set
 
+    var renewSessionCalled = false
+        private set
+
     var lockSessionCalled = false
         private set
 
@@ -217,6 +248,10 @@ private class FakeCryptoService(
         unlockSessionException?.let {
             throw it
         }
+    }
+
+    override fun renewSession() {
+        renewSessionCalled = true
     }
 
     override fun lockSession() {

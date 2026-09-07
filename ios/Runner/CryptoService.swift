@@ -15,6 +15,8 @@ protocol CryptoServicing {
 
     func lockSession()
 
+    func renewSession()
+
     func encrypt(
         _ plainText: String
     ) throws -> [String: Any]
@@ -29,13 +31,35 @@ protocol CryptoServicing {
 }
 
 final class CryptoService: CryptoServicing {
-    private let requireAuthentication: Bool
-    private let service = "com.oluwakemimafe.keyvault"
-    private let account = "vault-encryption-key"
-    private var sessionKey: SymmetricKey?
+    private static let authenticationValidityInterval: TimeInterval = 300
 
-    init(requireAuthentication: Bool = true) {
+    private let requireAuthentication: Bool
+    private let currentDate: () -> Date
+    private let service: String
+    private let account: String
+
+    private var sessionKey: SymmetricKey?
+    private var sessionAuthenticatedAt: Date?
+
+    private var isSessionValid: Bool {
+        guard sessionKey != nil, let sessionAuthenticatedAt else {
+            return false
+        }
+
+        return currentDate().timeIntervalSince(sessionAuthenticatedAt)
+            < Self.authenticationValidityInterval
+    }
+
+    init(
+        requireAuthentication: Bool = true,
+        currentDate: @escaping () -> Date = Date.init,
+        service: String = "com.oluwakemimafe.keyvault",
+        account: String = "vault-encryption-key"
+    ) {
         self.requireAuthentication = requireAuthentication
+        self.currentDate = currentDate
+        self.service = service
+        self.account = account
     }
 
     // MARK: - Encryption
@@ -100,25 +124,30 @@ final class CryptoService: CryptoServicing {
     // MARK: - Session Management
 
     func unlockSession() throws {
-        guard sessionKey == nil else {
+        if sessionKey != nil && isSessionValid {
             return
         }
 
-        do {
-            sessionKey = try getExistingKey()
-        } catch CryptoServiceError.keyNotFound {
-            _ = try createKey()
+        lockSession()
+        sessionKey = try getOrCreateKey()
+        sessionAuthenticatedAt = currentDate()
+    }
 
-            sessionKey = try getExistingKey()
+    func renewSession() {
+        guard sessionKey != nil else {
+            return
         }
+        sessionAuthenticatedAt = currentDate()
     }
 
     func lockSession() {
         sessionKey = nil
+        sessionAuthenticatedAt = nil
     }
 
     private func getSessionKey() throws -> SymmetricKey {
-        guard let sessionKey else {
+        guard let sessionKey, isSessionValid else {
+            lockSession()
             throw CryptoServiceError.authenticationRequired
         }
 
@@ -131,7 +160,8 @@ final class CryptoService: CryptoServicing {
         do {
             return try getExistingKey()
         } catch CryptoServiceError.keyNotFound {
-            return try createKey()
+            _ = try createKey()
+            return try getExistingKey()
         }
     }
 

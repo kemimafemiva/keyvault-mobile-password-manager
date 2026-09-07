@@ -19,6 +19,11 @@ class CryptoChannelHandler(
                     result.success(null)
                 }
 
+                "renewSession" -> {
+                    cryptoService.renewSession()
+                    result.success(null)
+                }
+
                 "lockSession" -> {
                     cryptoService.lockSession()
                     result.success(null)

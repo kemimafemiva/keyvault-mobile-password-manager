@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,6 +16,7 @@ class AuthenticationGate extends StatefulWidget {
   final Widget Function(
     VoidCallback onLock,
     Future<bool> Function() onReauthenticate,
+    Future<bool> Function() onSessionExpired,
   )
   unlockedBuilder;
 
@@ -84,7 +86,32 @@ class _AuthenticationGateState extends State<AuthenticationGate>
     try {
       final result = await widget.authenticationService.authenticate();
 
-      return result == AuthenticationResult.success;
+      if (result != AuthenticationResult.success) {
+        return false;
+      }
+
+      await widget.cryptoService.renewSession();
+
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _recoverExpiredSession() async {
+    try {
+      if (Platform.isIOS) {
+        await widget.cryptoService.unlockSession();
+        return true;
+      }
+
+      final result = await widget.authenticationService.authenticate();
+
+      if (result != AuthenticationResult.success) {
+        return false;
+      }
+
+      return true;
     } catch (_) {
       return false;
     }
@@ -178,9 +205,13 @@ class _AuthenticationGateState extends State<AuthenticationGate>
         onAuthenticated: _unlock,
       );
     } else {
-      content = widget.unlockedBuilder(() {
-        unawaited(_lock());
-      }, _reAuthenticate);
+      content = widget.unlockedBuilder(
+        () {
+          unawaited(_lock());
+        },
+        _reAuthenticate,
+        _recoverExpiredSession,
+      );
     }
 
     return Stack(

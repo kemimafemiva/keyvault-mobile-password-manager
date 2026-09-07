@@ -79,12 +79,13 @@ class KeyVaultApp extends StatelessWidget {
         authenticationService: _authenticationService,
         cryptoService: _cryptoService,
         navigatorKey: navigatorKey,
-        unlockedBuilder: (onLock, onReauthenticate) {
+        unlockedBuilder: (onLock, onReauthenticate, onSessionExpired) {
           return VaultScreen(
             repository: _repository,
             onLock: onLock,
             onAuthenticationRequired: onLock,
             onReauthenticate: onReauthenticate,
+            onSessionExpired: onSessionExpired,
           );
         },
       ),

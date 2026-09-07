@@ -13,6 +13,7 @@ import Flutter
 private final class FakeCryptoService: CryptoServicing {
     var errorToThrow: Error?
     var unlockSessionCallCount = 0
+    var renewSessionCallCount = 0
     var lockSessionCallCount = 0
     var encryptCallCount = 0
     var decryptCallCount = 0
@@ -24,6 +25,10 @@ private final class FakeCryptoService: CryptoServicing {
         if let errorToThrow {
             throw errorToThrow
         }
+    }
+
+    func renewSession() {
+        renewSessionCallCount += 1
     }
 
     func lockSession() {
@@ -94,6 +99,51 @@ final class CryptoChannelHandlerTests: XCTestCase {
             XCTAssertEqual(
                 cryptoService.unlockSessionCallCount,
                 1
+            )
+
+            XCTAssertEqual(
+                cryptoService.lockSessionCallCount,
+                0
+            )
+
+            expectation.fulfill()
+        }
+
+        wait(
+            for: [expectation],
+            timeout: 1.0
+        )
+    }
+
+    func testRenewSessionDelegatesToCryptoService() {
+        let cryptoService = FakeCryptoService()
+
+        let handler = CryptoChannelHandler(
+            cryptoService: cryptoService
+        )
+
+        let call = FlutterMethodCall(
+            methodName: "renewSession",
+            arguments: nil
+        )
+
+        let expectation = expectation(
+            description: "Method channel result returned"
+        )
+
+        handler.handle(
+            call: call
+        ) { result in
+            XCTAssertNil(result)
+
+            XCTAssertEqual(
+                cryptoService.renewSessionCallCount,
+                1
+            )
+
+            XCTAssertEqual(
+                cryptoService.unlockSessionCallCount,
+                0
             )
 
             XCTAssertEqual(
@@ -358,6 +408,11 @@ final class CryptoChannelHandlerTests: XCTestCase {
 
             XCTAssertEqual(
                 cryptoService.deleteKeyCallCount,
+                0
+            )
+
+            XCTAssertEqual(
+                cryptoService.renewSessionCallCount,
                 0
             )
 

@@ -32,6 +32,22 @@ void main() {
     expect(receivedCall!.arguments, isNull);
   });
 
+  test('renewSession calls native renewSession', () async {
+    MethodCall? receivedCall;
+
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(channel, (call) async {
+          receivedCall = call;
+          return null;
+        });
+
+    await service.renewSession();
+
+    expect(receivedCall, isNotNull);
+    expect(receivedCall!.method, 'renewSession');
+    expect(receivedCall!.arguments, isNull);
+  });
+
   test('lockSession calls native lockSession', () async {
     MethodCall? receivedCall;
 

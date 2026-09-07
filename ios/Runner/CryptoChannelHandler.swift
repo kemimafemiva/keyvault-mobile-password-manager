@@ -28,6 +28,10 @@ final class CryptoChannelHandler {
                 try cryptoService.unlockSession()
                 result(nil)
 
+            case "renewSession":
+                cryptoService.renewSession()
+                result(nil)
+
             case "lockSession":
                 cryptoService.lockSession()
                 result(nil)

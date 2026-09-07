@@ -9,7 +9,9 @@ class FakeNativeCryptoService extends NativeCryptoService {
   bool shouldRequireAuthentication = false;
   bool shouldFailUnlock = false;
 
+  int authenticationRequiredEncryptCount = 0;
   int unlockSessionCallCount = 0;
+  int renewSessionCallCount = 0;
   int lockSessionCallCount = 0;
   int encryptCallCount = 0;
   int decryptCallCount = 0;
@@ -29,6 +31,11 @@ class FakeNativeCryptoService extends NativeCryptoService {
   }
 
   @override
+  Future<void> renewSession() async {
+    renewSessionCallCount++;
+  }
+
+  @override
   Future<void> lockSession() async {
     lockSessionCallCount++;
     sessionUnlocked = false;
@@ -37,6 +44,15 @@ class FakeNativeCryptoService extends NativeCryptoService {
   @override
   Future<EncryptedData> encrypt(String plainText) async {
     encryptCallCount++;
+
+    if (shouldRequireAuthentication) {
+      throw const AuthenticationRequiredException();
+    }
+
+    if (authenticationRequiredEncryptCount > 0) {
+      authenticationRequiredEncryptCount--;
+      throw const AuthenticationRequiredException();
+    }
 
     final encoded = utf8.encode(plainText);
 

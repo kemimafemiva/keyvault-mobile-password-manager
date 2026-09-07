@@ -18,6 +18,7 @@ open class CryptoService(
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val TRANSFORMATION = "AES/GCM/NoPadding"
         private const val GCM_TAG_LENGTH = 128
+        private const val AUTHENTICATION_VALIDITY_SECONDS = 300
     }
 
     private val keyStore: KeyStore =
@@ -29,14 +30,23 @@ open class CryptoService(
         getOrCreateKey()
     }
 
+    open fun renewSession() {
+        /*
+        * Android Keystore manages the authentication validity
+        * period using the system authentication token.
+        * Successful biometric or device authentication renews
+        * that authorization without an application-level timer.
+        */
+    }
+
     open fun lockSession() {
         /*
-         * Android Keystore retains control of the key.
-         * No application-level key is cached on Android.
-         *
-         * The Flutter authentication gate is responsible for
-         * preventing vault access after the application locks.
-         */
+        * Android Keystore retains control of the key.
+        * No application-level key is cached on Android.
+        *
+        * The Flutter authentication gate is responsible for
+        * preventing vault access after the application locks.
+        */
     }
 
     open fun encrypt(
@@ -193,7 +203,7 @@ open class CryptoService(
             keySpecBuilder
                 .setUserAuthenticationRequired(true)
                 .setUserAuthenticationParameters(
-                    30,
+                    AUTHENTICATION_VALIDITY_SECONDS,
                     KeyProperties.AUTH_BIOMETRIC_STRONG or
                         KeyProperties.AUTH_DEVICE_CREDENTIAL
                 )

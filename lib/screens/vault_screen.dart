@@ -13,6 +13,7 @@ class VaultScreen extends StatefulWidget {
   final VoidCallback onLock;
   final VoidCallback onAuthenticationRequired;
   final Future<bool> Function() onReauthenticate;
+  final Future<bool> Function() onSessionExpired;
 
   const VaultScreen({
     super.key,
@@ -20,6 +21,7 @@ class VaultScreen extends StatefulWidget {
     required this.onLock,
     required this.onAuthenticationRequired,
     required this.onReauthenticate,
+    required this.onSessionExpired,
   });
 
   @override
@@ -88,6 +90,7 @@ class _VaultScreenState extends State<VaultScreen> {
             (_) => CredentialFormScreen(
               repository: widget.repository,
               onReauthenticate: widget.onReauthenticate,
+              onSessionExpired: widget.onSessionExpired,
             ),
       ),
     );
@@ -284,6 +287,7 @@ class _VaultScreenState extends State<VaultScreen> {
                       repository: widget.repository,
                       onReauthenticate: widget.onReauthenticate,
                       clipboardService: _clipboardService,
+                      onSessionExpired: widget.onSessionExpired,
                     ),
               ),
             );

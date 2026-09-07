@@ -14,7 +14,9 @@ final class CryptoServiceTests: XCTestCase {
 
     override func setUpWithError() throws {
         cryptoService = CryptoService(
-            requireAuthentication: false
+            requireAuthentication: false,
+            service: "com.oluwakemimafe.keyvault.tests",
+            account: "vault-encryption-key-tests"
         )
 
         // Each test starts with a fresh encryption key
@@ -238,6 +240,140 @@ final class CryptoServiceTests: XCTestCase {
                 cipherText: cipherText,
                 nonce: nonce,
                 mac: mac
+            )
+        )
+    }
+
+    func testSessionRemainsValidBeforeAuthenticationTimeout() throws {
+        var currentDate = Date(timeIntervalSince1970: 1_000)
+
+        cryptoService = CryptoService(
+            requireAuthentication: false,
+            currentDate: {currentDate},
+            service: "com.oluwakemimafe.keyvault.tests",
+            account: "vault-encryption-key-tests"
+        )
+
+        try cryptoService.deleteKey()
+        try cryptoService.unlockSession()
+
+        currentDate = currentDate.addingTimeInterval(299)
+
+        XCTAssertNoThrow(
+            try cryptoService.encrypt(
+                "TestPassword123!"
+            )
+        )
+    }
+
+    func testRenewSessionExtendsAuthenticationWindow() throws {
+        var currentDate = Date(timeIntervalSince1970: 1_000)
+
+        cryptoService = CryptoService(
+            requireAuthentication: false,
+            currentDate: {currentDate},
+            service: "com.oluwakemimafe.keyvault.tests",
+            account: "vault-encryption-key-tests"
+        )
+
+        try cryptoService.deleteKey()
+        try cryptoService.unlockSession()
+
+        currentDate = currentDate.addingTimeInterval(250)
+
+        cryptoService.renewSession()
+
+        currentDate = currentDate.addingTimeInterval(250)
+
+        XCTAssertNoThrow(
+            try cryptoService.encrypt(
+                "TestPassword123!"
+            )
+        )
+    }
+
+    func testRenewSessionDoesNotUnlockLockedSession() throws {
+        try cryptoService.unlockSession()
+
+        cryptoService.lockSession()
+        cryptoService.renewSession()
+
+        XCTAssertThrowsError(
+            try cryptoService.encrypt(
+                "TestPassword123!"
+            )
+        ) { error in
+            guard case CryptoServiceError.authenticationRequired = error else {
+                XCTFail(
+                    "Expected authenticationRequired, got \(error)."
+                )
+                return
+            }
+        }
+    }
+
+    func testSessionExpiresAtAuthenticationTimeout() throws {
+        var currentDate = Date(timeIntervalSince1970: 1_000)
+
+        cryptoService = CryptoService(
+            requireAuthentication: false,
+            currentDate: {currentDate},
+            service: "com.oluwakemimafe.keyvault.tests",
+            account: "vault-encryption-key-tests"
+        )
+
+        try cryptoService.deleteKey()
+        try cryptoService.unlockSession()
+
+        currentDate = currentDate.addingTimeInterval(300)
+
+        XCTAssertThrowsError(
+            try cryptoService.encrypt(
+                "TestPassword123!"
+            )
+        ) { error in
+            guard case CryptoServiceError.authenticationRequired = error else {
+                XCTFail(
+                    "Expected authenticationRequired, got \(error)."
+                )
+                return
+            }
+        }
+    }
+
+    func testUnlockSessionStartsNewAuthenticationWindowAfterExpiry() throws {
+        var currentDate = Date(timeIntervalSince1970: 1_000)
+
+        cryptoService = CryptoService(
+            requireAuthentication: false,
+            currentDate: {currentDate},
+            service: "com.oluwakemimafe.keyvault.tests",
+            account: "vault-encryption-key-tests"
+        )
+
+        try cryptoService.deleteKey()
+        try cryptoService.unlockSession()
+
+        currentDate = currentDate.addingTimeInterval(300)
+
+        XCTAssertThrowsError(
+            try cryptoService.encrypt(
+                "TestPassword123!"
+            )
+        ) { error in
+            guard case CryptoServiceError.authenticationRequired = error else {
+                XCTFail(
+                    "Expected authenticationRequired, got \(error)."
+                )
+                return
+            }
+        }
+
+        try cryptoService.unlockSession()
+
+        XCTAssertNoThrow(
+            try cryptoService.encrypt(
+                "TestPassword123!"
             )
         )
     }

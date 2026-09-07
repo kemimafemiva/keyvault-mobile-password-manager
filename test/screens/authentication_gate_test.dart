@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:key_vault/models/authentication_result.dart';
@@ -31,6 +33,7 @@ void main() {
     Widget Function(
       VoidCallback onLock,
       Future<bool> Function() onReauthenticate,
+      Future<bool> Function() onSessionExpired,
     )?
     unlockedBuilder,
   }) {
@@ -42,7 +45,7 @@ void main() {
         navigatorKey: navigatorKey,
         unlockedBuilder:
             unlockedBuilder ??
-            (_, _) => const Scaffold(body: Text('Vault content')),
+            (_, _, _) => const Scaffold(body: Text('Vault content')),
       ),
     );
   }
@@ -140,7 +143,7 @@ void main() {
     await tester.pumpWidget(
       buildAuthenticationGate(
         unlockedBuilder:
-            (_, _) => const Scaffold(body: Text('Sensitive vault content')),
+            (_, _, _) => const Scaffold(body: Text('Sensitive vault content')),
       ),
     );
 
@@ -165,7 +168,7 @@ void main() {
   ) async {
     await tester.pumpWidget(
       buildAuthenticationGate(
-        unlockedBuilder: (onLock, onReauthenticate) {
+        unlockedBuilder: (onLock, onReauthenticate, onSessionExpired) {
           return Scaffold(
             body: Column(
               children: [
@@ -193,12 +196,14 @@ void main() {
     expect(cryptoService.sessionUnlocked, isFalse);
   });
 
-  testWidgets('reauthenticates without locking crypto session', (tester) async {
+  testWidgets('reauthentication renews the existing crypto session', (
+    tester,
+  ) async {
     Future<bool> Function()? reauthenticate;
 
     await tester.pumpWidget(
       buildAuthenticationGate(
-        unlockedBuilder: (onLock, onReauthenticate) {
+        unlockedBuilder: (onLock, onReauthenticate, onSessionExpired) {
           reauthenticate = onReauthenticate;
 
           return const Scaffold(body: Text('Vault content'));
@@ -210,6 +215,7 @@ void main() {
 
     expect(find.text('Vault content'), findsOneWidget);
     expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.renewSessionCallCount, 0);
     expect(cryptoService.sessionUnlocked, isTrue);
     expect(reauthenticate, isNotNull);
 
@@ -231,9 +237,10 @@ void main() {
       authenticationCallsBeforeReauthentication + 1,
     );
 
-    // Reauthentication must not create a new
-    // crypto session or destroy the current one.
+    // Successful reauthentication renews the existing
+    // crypto session without unlocking or replacing it.
     expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.renewSessionCallCount, 1);
     expect(cryptoService.lockSessionCallCount, 0);
     expect(cryptoService.sessionUnlocked, isTrue);
 
@@ -248,7 +255,7 @@ void main() {
 
     await tester.pumpWidget(
       buildAuthenticationGate(
-        unlockedBuilder: (onLock, onReauthenticate) {
+        unlockedBuilder: (onLock, onReauthenticate, onSessionExpired) {
           reauthenticate = onReauthenticate;
 
           return const Scaffold(body: Text('Vault content'));
@@ -283,13 +290,120 @@ void main() {
       authenticationCallsBeforeReauthentication + 1,
     );
 
-    // Failed deliberate reauthentication must not
-    // destroy the already unlocked crypto session.
+    // Failed deliberate reauthentication must not renew
+    // or destroy the already unlocked crypto session.
     expect(cryptoService.unlockSessionCallCount, 1);
+    expect(cryptoService.renewSessionCallCount, 0);
     expect(cryptoService.lockSessionCallCount, 0);
     expect(cryptoService.sessionUnlocked, isTrue);
 
     expect(find.text('Vault content'), findsOneWidget);
     expect(find.text('KeyVault is locked'), findsNothing);
+  });
+
+  testWidgets('expired session recovery uses the platform-specific flow', (
+    tester,
+  ) async {
+    Future<bool> Function()? recoverExpiredSession;
+
+    await tester.pumpWidget(
+      buildAuthenticationGate(
+        unlockedBuilder: (onLock, onReauthenticate, onSessionExpired) {
+          recoverExpiredSession = onSessionExpired;
+
+          return const Scaffold(body: Text('Vault content'));
+        },
+      ),
+    );
+
+    await tapUnlock(tester);
+
+    expect(recoverExpiredSession, isNotNull);
+
+    final authenticationCallsBeforeRecovery =
+        authenticationService.authenticationCallCount;
+    final unlockCallsBeforeRecovery = cryptoService.unlockSessionCallCount;
+
+    final result = await recoverExpiredSession!();
+
+    await tester.pump();
+
+    expect(result, isTrue);
+
+    if (Platform.isIOS) {
+      // iOS recovers the expired session through Keychain
+      // access without a separate local authentication call.
+      expect(
+        authenticationService.authenticationCallCount,
+        authenticationCallsBeforeRecovery,
+      );
+      expect(
+        cryptoService.unlockSessionCallCount,
+        unlockCallsBeforeRecovery + 1,
+      );
+    } else {
+      // Android refreshes the Keystore authorization through
+      // authentication without another crypto session unlock.
+      expect(
+        authenticationService.authenticationCallCount,
+        authenticationCallsBeforeRecovery + 1,
+      );
+      expect(cryptoService.unlockSessionCallCount, unlockCallsBeforeRecovery);
+    }
+
+    expect(cryptoService.renewSessionCallCount, 0);
+  });
+
+  testWidgets('failed expired session recovery returns false', (tester) async {
+    Future<bool> Function()? recoverExpiredSession;
+
+    await tester.pumpWidget(
+      buildAuthenticationGate(
+        unlockedBuilder: (onLock, onReauthenticate, onSessionExpired) {
+          recoverExpiredSession = onSessionExpired;
+
+          return const Scaffold(body: Text('Vault content'));
+        },
+      ),
+    );
+
+    await tapUnlock(tester);
+
+    expect(recoverExpiredSession, isNotNull);
+
+    if (Platform.isIOS) {
+      cryptoService.shouldFailUnlock = true;
+    } else {
+      authenticationService.authenticationResult = AuthenticationResult.failed;
+    }
+
+    final authenticationCallsBeforeRecovery =
+        authenticationService.authenticationCallCount;
+    final unlockCallsBeforeRecovery = cryptoService.unlockSessionCallCount;
+
+    final result = await recoverExpiredSession!();
+
+    await tester.pump();
+
+    expect(result, isFalse);
+
+    if (Platform.isIOS) {
+      expect(
+        authenticationService.authenticationCallCount,
+        authenticationCallsBeforeRecovery,
+      );
+      expect(
+        cryptoService.unlockSessionCallCount,
+        unlockCallsBeforeRecovery + 1,
+      );
+    } else {
+      expect(
+        authenticationService.authenticationCallCount,
+        authenticationCallsBeforeRecovery + 1,
+      );
+      expect(cryptoService.unlockSessionCallCount, unlockCallsBeforeRecovery);
+    }
+
+    expect(cryptoService.renewSessionCallCount, 0);
   });
 }

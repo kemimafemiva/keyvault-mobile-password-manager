@@ -1,5 +1,7 @@
 package com.oluwakemimafe.key_vault
 
+import android.security.keystore.KeyInfo
+import android.security.keystore.KeyProperties
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -7,6 +9,9 @@ import org.junit.Assert.assertThrows
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.security.KeyFactory
+import java.security.KeyStore
+import javax.crypto.SecretKey
 
 @RunWith(AndroidJUnit4::class)
 class CryptoServiceTest {
@@ -225,6 +230,58 @@ class CryptoServiceTest {
                     "TestPassword123!"
                 )
             }
+        } finally {
+            protectedCryptoService.deleteKey()
+        }
+    }
+
+    @Test
+    fun protectedKeyUsesFiveMinuteAuthenticationValidityPeriod() {
+        cryptoService.deleteKey()
+
+        val protectedCryptoService =
+            CryptoService(
+                requireAuthentication = true
+            )
+
+        try {
+            try {
+                protectedCryptoService.encrypt(
+                    "TestPassword123!"
+                )
+            } catch (_: AuthenticationRequiredException) {
+                // The key has been created successfully.
+            }
+
+            val keyStore =
+                KeyStore.getInstance(
+                    "AndroidKeyStore"
+                ).apply {
+                    load(null)
+                }
+
+            val secretKey =
+                keyStore.getKey(
+                    "keyvault_encryption_key",
+                    null
+                ) as SecretKey
+
+            val keyFactory =
+                KeyFactory.getInstance(
+                    secretKey.algorithm,
+                    "AndroidKeyStore"
+                )
+
+            val keyInfo =
+                keyFactory.getKeySpec(
+                    secretKey,
+                    KeyInfo::class.java
+                )
+
+            assertEquals(
+                300,
+                keyInfo.userAuthenticationValidityDurationSeconds
+            )
         } finally {
             protectedCryptoService.deleteKey()
         }

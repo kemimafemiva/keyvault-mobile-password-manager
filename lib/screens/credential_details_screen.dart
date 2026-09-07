@@ -12,6 +12,7 @@ class CredentialDetailsScreen extends StatefulWidget {
   final CredentialRepository repository;
   final ClipboardService clipboardService;
   final Future<bool> Function() onReauthenticate;
+  final Future<bool> Function() onSessionExpired;
 
   const CredentialDetailsScreen({
     super.key,
@@ -19,6 +20,7 @@ class CredentialDetailsScreen extends StatefulWidget {
     required this.repository,
     required this.clipboardService,
     required this.onReauthenticate,
+    required this.onSessionExpired,
   });
 
   @override
@@ -67,6 +69,7 @@ class _CredentialDetailsScreenState extends State<CredentialDetailsScreen> {
               repository: widget.repository,
               credential: _credential,
               onReauthenticate: widget.onReauthenticate,
+              onSessionExpired: widget.onSessionExpired,
             ),
       ),
     );

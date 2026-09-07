@@ -20,6 +20,10 @@ class NativeCryptoService {
     }
   }
 
+  Future<void> renewSession() async {
+    await _channel.invokeMethod<void>('renewSession');
+  }
+
   Future<void> lockSession() async {
     await _channel.invokeMethod<void>('lockSession');
   }
